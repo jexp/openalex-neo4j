@@ -225,7 +225,7 @@ class OpenAlexClient:
             batch_ids = topic_ids[i:i + batch_size]
             try:
                 filter_str = "|".join(f"https://openalex.org/{tid}" for tid in batch_ids)
-                results = Topics().filter(openalex_id=filter_str).get()
+                results = Topics().filter(openalex=filter_str).get()
 
                 for topic_data in results:
                     try:

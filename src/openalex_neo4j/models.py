@@ -51,34 +51,58 @@ class Work:
         author_ids = []
         for authorship in data.get("authorships", []):
             if author := authorship.get("author"):
-                if author_id := extract_openalex_id(author.get("id")):
-                    author_ids.append(author_id)
+                # Handle both dict and string formats
+                if isinstance(author, dict):
+                    if author_id := extract_openalex_id(author.get("id")):
+                        author_ids.append(author_id)
+                elif isinstance(author, str):
+                    if author_id := extract_openalex_id(author):
+                        author_ids.append(author_id)
 
         # Extract institution IDs from authorships
         institution_ids = []
         for authorship in data.get("authorships", []):
             for institution in authorship.get("institutions", []):
-                if inst_id := extract_openalex_id(institution.get("id")):
-                    institution_ids.append(inst_id)
+                # Handle both dict and string formats
+                if isinstance(institution, dict):
+                    if inst_id := extract_openalex_id(institution.get("id")):
+                        institution_ids.append(inst_id)
+                elif isinstance(institution, str):
+                    if inst_id := extract_openalex_id(institution):
+                        institution_ids.append(inst_id)
 
         # Extract source ID
         source_id = None
         if primary_location := data.get("primary_location"):
             if source := primary_location.get("source"):
-                source_id = extract_openalex_id(source.get("id"))
+                # Handle both dict and string formats
+                if isinstance(source, dict):
+                    source_id = extract_openalex_id(source.get("id"))
+                elif isinstance(source, str):
+                    source_id = extract_openalex_id(source)
 
         # Extract topic IDs
         topic_ids = []
         for topic in data.get("topics", []):
-            if topic_id := extract_openalex_id(topic.get("id")):
-                topic_ids.append(topic_id)
+            # Handle both dict and string formats
+            if isinstance(topic, dict):
+                if topic_id := extract_openalex_id(topic.get("id")):
+                    topic_ids.append(topic_id)
+            elif isinstance(topic, str):
+                if topic_id := extract_openalex_id(topic):
+                    topic_ids.append(topic_id)
 
         # Extract funder IDs
         funder_ids = []
         for grant in data.get("grants", []):
             if funder := grant.get("funder"):
-                if funder_id := extract_openalex_id(funder.get("id")):
-                    funder_ids.append(funder_id)
+                # Handle both dict and string formats
+                if isinstance(funder, dict):
+                    if funder_id := extract_openalex_id(funder.get("id")):
+                        funder_ids.append(funder_id)
+                elif isinstance(funder, str):
+                    if funder_id := extract_openalex_id(funder):
+                        funder_ids.append(funder_id)
 
         # Extract referenced work IDs
         referenced_work_ids = [
