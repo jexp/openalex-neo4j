@@ -184,10 +184,12 @@ class OpenAlexImporter:
         """
         counts = {}
 
-        # Works
+        # Works (with dynamic type labels)
         if self.works:
             work_nodes = [w.to_node_dict() for w in self.works.values()]
-            counts["works"] = self.neo4j.batch_create_nodes("Work", work_nodes)
+            counts["works"] = self.neo4j.batch_create_nodes(
+                "Work", work_nodes, type_label_field="type_label"
+            )
 
         # Authors
         if self.authors:

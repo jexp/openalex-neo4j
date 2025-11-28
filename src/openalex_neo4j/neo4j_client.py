@@ -8,6 +8,29 @@ from neo4j import GraphDatabase, Driver, Session
 logger = logging.getLogger(__name__)
 
 
+def to_camel_case_label(text: str | None) -> str | None:
+    """Convert hyphenated text to CamelCase for Neo4j labels.
+
+    Args:
+        text: Hyphenated string like "journal-article"
+
+    Returns:
+        CamelCase string like "JournalArticle", or None if input is None
+
+    Examples:
+        >>> to_camel_case_label("journal-article")
+        "JournalArticle"
+        >>> to_camel_case_label("book-chapter")
+        "BookChapter"
+    """
+    if not text:
+        return None
+
+    # Split on hyphens and capitalize each part
+    parts = text.split('-')
+    return ''.join(part.capitalize() for part in parts)
+
+
 class Neo4jClient:
     """Client for Neo4j database operations."""
 
@@ -189,7 +212,8 @@ class Neo4jClient:
         self,
         label: str,
         nodes: list[dict[str, Any]],
-        batch_size: int = 500
+        batch_size: int = 500,
+        dynamic_label: bool = False
     ) -> int:
         """Create nodes in batches using UNWIND and MERGE.
 
@@ -197,6 +221,8 @@ class Neo4jClient:
             label: Node label (e.g., "Work", "Author")
             nodes: List of node properties dictionaries
             batch_size: Number of nodes per batch
+            dynamic_label: If True, use item._label field from node dict as additional
+                dynamic label using Neo4j's dynamic label syntax: SET n:$(item._label)
 
         Returns:
             Total number of nodes created/updated
@@ -207,12 +233,23 @@ class Neo4jClient:
         logger.info(f"Creating {len(nodes)} {label} nodes in batches of {batch_size}")
         total_created = 0
 
-        query = f"""
-        UNWIND $batch AS item
-        MERGE (n:{label} {{id: item.id}})
-        SET n += item
-        RETURN count(n) as count
-        """
+        # Build query with optional dynamic label using SET n:$(expr) syntax
+        if dynamic_label:
+            query = f"""
+            UNWIND $batch AS item
+            MERGE (n:{label} {{id: item.id}})
+            SET n += item {{.*, _label: null}},
+                n:$(item._label)
+            RETURN count(n) as count
+            """
+            logger.debug("Using dynamic labels from _label field")
+        else:
+            query = f"""
+            UNWIND $batch AS item
+            MERGE (n:{label} {{id: item.id}})
+            SET n += item
+            RETURN count(n) as count
+            """
 
         with self.driver.session() as session:
             for i in range(0, len(nodes), batch_size):

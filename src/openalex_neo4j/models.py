@@ -141,6 +141,8 @@ class Work:
 
     def to_node_dict(self) -> dict[str, Any]:
         """Convert to dictionary for Neo4j node creation."""
+        from .neo4j_client import to_camel_case_label
+
         node_dict = {
             "id": self.id,
             "title": self.title,
@@ -152,6 +154,11 @@ class Work:
             "is_oa": self.is_oa,
             "abstract": self.abstract,
         }
+        # Add CamelCase type as dynamic label field (or "Work" as default)
+        if self.type:
+            node_dict["_label"] = to_camel_case_label(self.type)
+        else:
+            node_dict["_label"] = "Work"
         # Only include embedding if it exists
         if self.embedding:
             node_dict["embedding"] = self.embedding

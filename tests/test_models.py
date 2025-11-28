@@ -115,6 +115,20 @@ class TestWork:
         assert node_dict["publication_year"] == 2023
         assert node_dict["cited_by_count"] == 10
 
+    def test_to_node_dict_with_type(self):
+        """Test converting Work with type to node dictionary includes _label."""
+        work = Work(
+            id="W123",
+            title="Test",
+            type="journal-article",
+            publication_year=2023,
+            cited_by_count=10,
+        )
+        node_dict = work.to_node_dict()
+        assert node_dict["id"] == "W123"
+        assert node_dict["type"] == "journal-article"
+        assert node_dict["_label"] == "JournalArticle"
+
     def test_abstract_reconstruction(self):
         """Test reconstructing abstract from inverted index."""
         data = {
