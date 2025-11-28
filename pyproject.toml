@@ -1,0 +1,45 @@
+[project]
+name = "openalex-neo4j"
+version = "0.1.0"
+description = "CLI tool for importing OpenAlex data into Neo4j"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pyalex>=0.13",
+    "neo4j>=5.14.0",
+    "click>=8.1.7",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.3",
+    "pytest-env>=1.1.3",
+    "pytest-cov>=4.1.0",
+]
+
+[project.scripts]
+openalex-neo4j = "openalex_neo4j.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openalex_neo4j"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = ["-v", "--strict-markers"]
+markers = [
+    "integration: marks tests as integration tests (require Neo4j instance)",
+    "unit: marks tests as unit tests",
+]
+env = [
+    "NEO4J_URI=bolt://localhost:7687",
+    "NEO4J_USERNAME=neo4j",
+    "NEO4J_PASSWORD=password",
+]

@@ -1,0 +1,231 @@
+"""Neo4j client for database operations."""
+
+import logging
+from typing import Any
+
+from neo4j import GraphDatabase, Driver, Session
+
+logger = logging.getLogger(__name__)
+
+
+class Neo4jClient:
+    """Client for Neo4j database operations."""
+
+    # Entity types that need constraints
+    ENTITY_TYPES = [
+        "Work",
+        "Author",
+        "Institution",
+        "Source",
+        "Topic",
+        "Publisher",
+        "Funder",
+    ]
+
+    def __init__(self, uri: str, username: str, password: str):
+        """Initialize Neo4j client.
+
+        Args:
+            uri: Neo4j connection URI (e.g., bolt://localhost:7687)
+            username: Neo4j username
+            password: Neo4j password
+        """
+        self.uri = uri
+        self.username = username
+        self.password = password
+        self._driver: Driver | None = None
+
+    def __enter__(self) -> "Neo4jClient":
+        """Context manager entry."""
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit."""
+        self.close()
+
+    def connect(self) -> None:
+        """Establish connection to Neo4j."""
+        logger.info(f"Connecting to Neo4j at {self.uri}")
+        self._driver = GraphDatabase.driver(
+            self.uri,
+            auth=(self.username, self.password)
+        )
+        # Verify connectivity
+        self._driver.verify_connectivity()
+        logger.info("Successfully connected to Neo4j")
+
+    def close(self) -> None:
+        """Close connection to Neo4j."""
+        if self._driver:
+            self._driver.close()
+            logger.info("Closed Neo4j connection")
+
+    @property
+    def driver(self) -> Driver:
+        """Get the Neo4j driver.
+
+        Returns:
+            Neo4j driver instance
+
+        Raises:
+            RuntimeError: If not connected
+        """
+        if not self._driver:
+            raise RuntimeError("Not connected to Neo4j. Call connect() first.")
+        return self._driver
+
+    def create_constraints(self) -> None:
+        """Create uniqueness constraints for all entity types."""
+        logger.info("Creating constraints for entity types")
+
+        with self.driver.session() as session:
+            for entity_type in self.ENTITY_TYPES:
+                constraint_name = f"{entity_type.lower()}_id_unique"
+                query = f"""
+                CREATE CONSTRAINT {constraint_name} IF NOT EXISTS
+                FOR (n:{entity_type})
+                REQUIRE n.id IS UNIQUE
+                """
+                try:
+                    session.run(query)
+                    logger.debug(f"Created constraint for {entity_type}")
+                except Exception as e:
+                    logger.warning(f"Failed to create constraint for {entity_type}: {e}")
+
+        logger.info("Finished creating constraints")
+
+    def batch_create_nodes(
+        self,
+        label: str,
+        nodes: list[dict[str, Any]],
+        batch_size: int = 500
+    ) -> int:
+        """Create nodes in batches using UNWIND and MERGE.
+
+        Args:
+            label: Node label (e.g., "Work", "Author")
+            nodes: List of node properties dictionaries
+            batch_size: Number of nodes per batch
+
+        Returns:
+            Total number of nodes created/updated
+        """
+        if not nodes:
+            return 0
+
+        logger.info(f"Creating {len(nodes)} {label} nodes in batches of {batch_size}")
+        total_created = 0
+
+        query = f"""
+        UNWIND $batch AS item
+        MERGE (n:{label} {{id: item.id}})
+        SET n += item
+        RETURN count(n) as count
+        """
+
+        with self.driver.session() as session:
+            for i in range(0, len(nodes), batch_size):
+                batch = nodes[i:i + batch_size]
+                try:
+                    result = session.run(query, batch=batch)
+                    count = result.single()["count"]
+                    total_created += count
+                    logger.debug(f"Batch {i // batch_size + 1}: Created/updated {count} {label} nodes")
+                except Exception as e:
+                    logger.error(f"Failed to create batch of {label} nodes: {e}")
+
+        logger.info(f"Finished creating {total_created} {label} nodes")
+        return total_created
+
+    def batch_create_relationships(
+        self,
+        rel_type: str,
+        source_label: str,
+        target_label: str,
+        relationships: list[dict[str, Any]],
+        batch_size: int = 500
+    ) -> int:
+        """Create relationships in batches using UNWIND and MERGE.
+
+        Args:
+            rel_type: Relationship type (e.g., "AUTHORED", "CITES")
+            source_label: Source node label
+            target_label: Target node label
+            relationships: List of dicts with 'source_id' and 'target_id'
+            batch_size: Number of relationships per batch
+
+        Returns:
+            Total number of relationships created
+        """
+        if not relationships:
+            return 0
+
+        logger.info(
+            f"Creating {len(relationships)} {rel_type} relationships "
+            f"in batches of {batch_size}"
+        )
+        total_created = 0
+
+        query = f"""
+        UNWIND $batch AS rel
+        MATCH (a:{source_label} {{id: rel.source_id}})
+        MATCH (b:{target_label} {{id: rel.target_id}})
+        MERGE (a)-[r:{rel_type}]->(b)
+        RETURN count(r) as count
+        """
+
+        with self.driver.session() as session:
+            for i in range(0, len(relationships), batch_size):
+                batch = relationships[i:i + batch_size]
+                try:
+                    result = session.run(query, batch=batch)
+                    count = result.single()["count"]
+                    total_created += count
+                    logger.debug(
+                        f"Batch {i // batch_size + 1}: "
+                        f"Created {count} {rel_type} relationships"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to create batch of {rel_type} relationships: {e}")
+
+        logger.info(f"Finished creating {total_created} {rel_type} relationships")
+        return total_created
+
+    def get_node_count(self, label: str) -> int:
+        """Get count of nodes with given label.
+
+        Args:
+            label: Node label
+
+        Returns:
+            Number of nodes
+        """
+        query = f"MATCH (n:{label}) RETURN count(n) as count"
+        with self.driver.session() as session:
+            result = session.run(query)
+            return result.single()["count"]
+
+    def get_relationship_count(self, rel_type: str) -> int:
+        """Get count of relationships of given type.
+
+        Args:
+            rel_type: Relationship type
+
+        Returns:
+            Number of relationships
+        """
+        query = f"MATCH ()-[r:{rel_type}]->() RETURN count(r) as count"
+        with self.driver.session() as session:
+            result = session.run(query)
+            return result.single()["count"]
+
+    def clear_database(self) -> None:
+        """Clear all nodes and relationships from the database.
+
+        WARNING: This will delete ALL data in the database!
+        """
+        logger.warning("Clearing entire database")
+        with self.driver.session() as session:
+            session.run("MATCH (n) DETACH DELETE n")
+        logger.info("Database cleared")
