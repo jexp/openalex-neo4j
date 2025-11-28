@@ -229,3 +229,53 @@ class Neo4jClient:
         with self.driver.session() as session:
             session.run("MATCH (n) DETACH DELETE n")
         logger.info("Database cleared")
+
+    def get_node_by_id(self, label: str, node_id: str) -> dict[str, Any] | None:
+        """Get a node by its ID.
+
+        Args:
+            label: Node label
+            node_id: Node ID
+
+        Returns:
+            Node properties as dict, or None if not found
+        """
+        query = f"MATCH (n:{label} {{id: $id}}) RETURN n"
+        with self.driver.session() as session:
+            result = session.run(query, id=node_id)
+            record = result.single()
+            if record:
+                return dict(record["n"])
+            return None
+
+    def get_relationships(
+        self,
+        rel_type: str,
+        source_label: str | None = None,
+        target_label: str | None = None,
+        limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Get relationships of given type.
+
+        Args:
+            rel_type: Relationship type
+            source_label: Optional source node label filter
+            target_label: Optional target node label filter
+            limit: Maximum number of relationships to return
+
+        Returns:
+            List of relationship dicts with source_id and target_id
+        """
+        source_pattern = f":{source_label}" if source_label else ""
+        target_pattern = f":{target_label}" if target_label else ""
+        query = f"""
+        MATCH (a{source_pattern})-[r:{rel_type}]->(b{target_pattern})
+        RETURN a.id as source_id, b.id as target_id
+        LIMIT $limit
+        """
+        with self.driver.session() as session:
+            result = session.run(query, limit=limit)
+            return [
+                {"source_id": record["source_id"], "target_id": record["target_id"]}
+                for record in result
+            ]

@@ -90,6 +90,18 @@ class TestNeo4jClientIntegration:
         # Verify nodes exist
         assert neo4j_client.get_node_count("Work") == 3
 
+        # Verify node properties are stored correctly
+        work1 = neo4j_client.get_node_by_id("Work", "W1")
+        assert work1 is not None
+        assert work1["id"] == "W1"
+        assert work1["title"] == "Paper 1"
+        assert work1["publication_year"] == 2020
+
+        work2 = neo4j_client.get_node_by_id("Work", "W2")
+        assert work2 is not None
+        assert work2["title"] == "Paper 2"
+        assert work2["publication_year"] == 2021
+
     def test_batch_create_relationships(self, neo4j_client):
         """Test creating relationships in batch."""
         # Create nodes first
@@ -118,6 +130,15 @@ class TestNeo4jClientIntegration:
         # Verify relationships exist
         assert neo4j_client.get_relationship_count("AUTHORED") == 2
 
+        # Verify actual relationships connect the right nodes
+        authored_rels = neo4j_client.get_relationships("AUTHORED", "Author", "Work")
+        assert len(authored_rels) == 2
+
+        # Check that both relationships exist
+        rel_pairs = {(rel["source_id"], rel["target_id"]) for rel in authored_rels}
+        assert ("A1", "W1") in rel_pairs
+        assert ("A1", "W2") in rel_pairs
+
     def test_merge_duplicates(self, neo4j_client):
         """Test that MERGE handles duplicate nodes correctly."""
         nodes = [
@@ -130,6 +151,13 @@ class TestNeo4jClientIntegration:
         # Should have only 1 node
         assert neo4j_client.get_node_count("Work") == 1
 
+        # Verify the node has updated properties
+        work = neo4j_client.get_node_by_id("Work", "W1")
+        assert work is not None
+        assert work["id"] == "W1"
+        # Last write wins - should have updated title
+        assert work["title"] == "Paper 1 Updated"
+
     def test_get_counts(self, neo4j_client):
         """Test getting node and relationship counts."""
         # Create some data
@@ -141,6 +169,15 @@ class TestNeo4jClientIntegration:
 
         assert work_count == 1
         assert author_count == 1
+
+        # Verify we can retrieve the actual nodes
+        work = neo4j_client.get_node_by_id("Work", "W1")
+        author = neo4j_client.get_node_by_id("Author", "A1")
+
+        assert work is not None
+        assert work["title"] == "Test"
+        assert author is not None
+        assert author["display_name"] == "Test"
 
 
 class TestOpenAlexClientIntegration:
@@ -193,7 +230,7 @@ class TestFullImportIntegration:
     """Integration test for full import workflow."""
 
     def test_small_import(self, neo4j_uri, neo4j_username, neo4j_password):
-        """Test importing a small dataset."""
+        """Test importing a small dataset and validate data in Neo4j."""
         # Create clients
         neo4j_client = Neo4jClient(neo4j_uri, neo4j_username, neo4j_password)
         try:
@@ -223,13 +260,38 @@ class TestFullImportIntegration:
             work_count = neo4j_client.get_node_count("Work")
             assert work_count > 0
 
+            # Validate that we can retrieve actual work data
+            # Get a work ID from the importer
+            if importer.works:
+                work_id = list(importer.works.keys())[0]
+                work_from_db = neo4j_client.get_node_by_id("Work", work_id)
+
+                assert work_from_db is not None, f"Work {work_id} not found in database"
+                assert work_from_db["id"] == work_id
+                assert "title" in work_from_db
+                print(f"Validated work: {work_from_db['title']}")
+
+            # Validate authors if any were imported
+            if counts.get("authors", 0) > 0:
+                author_count = neo4j_client.get_node_count("Author")
+                assert author_count > 0
+
+                # Get an author and validate
+                if importer.authors:
+                    author_id = list(importer.authors.keys())[0]
+                    author_from_db = neo4j_client.get_node_by_id("Author", author_id)
+
+                    assert author_from_db is not None
+                    assert author_from_db["id"] == author_id
+                    assert "display_name" in author_from_db
+
         finally:
             # Clean up
             neo4j_client.clear_database()
             neo4j_client.close()
 
     def test_import_with_relationships(self, neo4j_uri, neo4j_username, neo4j_password):
-        """Test that relationships are created correctly."""
+        """Test that relationships are created correctly and validate in Neo4j."""
         neo4j_client = Neo4jClient(neo4j_uri, neo4j_username, neo4j_password)
         try:
             neo4j_client.connect()
@@ -251,11 +313,49 @@ class TestFullImportIntegration:
 
             # Check that we have both nodes and relationships
             assert counts.get("works", 0) > 0
+            print(f"\nImported: {counts}")
 
             # Check for author relationships if authors were found
             if counts.get("authors", 0) > 0:
                 authored_count = neo4j_client.get_relationship_count("AUTHORED")
                 assert authored_count > 0
+
+                # Validate actual relationships
+                authored_rels = neo4j_client.get_relationships("AUTHORED", "Author", "Work", limit=10)
+                assert len(authored_rels) > 0
+
+                # Pick one relationship and validate both ends exist
+                rel = authored_rels[0]
+                author = neo4j_client.get_node_by_id("Author", rel["source_id"])
+                work = neo4j_client.get_node_by_id("Work", rel["target_id"])
+
+                assert author is not None, f"Author {rel['source_id']} not found"
+                assert work is not None, f"Work {rel['target_id']} not found"
+                print(f"Validated relationship: {author['display_name']} -> {work['title']}")
+
+            # Check for source relationships if sources were found
+            if counts.get("sources", 0) > 0 and counts.get("published_in", 0) > 0:
+                published_rels = neo4j_client.get_relationships("PUBLISHED_IN", "Work", "Source", limit=5)
+                if published_rels:
+                    rel = published_rels[0]
+                    work = neo4j_client.get_node_by_id("Work", rel["source_id"])
+                    source = neo4j_client.get_node_by_id("Source", rel["target_id"])
+
+                    assert work is not None
+                    assert source is not None
+                    print(f"Validated publication: {work['title']} in {source['display_name']}")
+
+            # Check for citation relationships if they exist
+            if counts.get("cites", 0) > 0:
+                cite_rels = neo4j_client.get_relationships("CITES", "Work", "Work", limit=5)
+                if cite_rels:
+                    rel = cite_rels[0]
+                    citing_work = neo4j_client.get_node_by_id("Work", rel["source_id"])
+                    cited_work = neo4j_client.get_node_by_id("Work", rel["target_id"])
+
+                    assert citing_work is not None
+                    assert cited_work is not None
+                    print(f"Validated citation: {citing_work['title']} cites {cited_work['title']}")
 
         finally:
             neo4j_client.clear_database()
