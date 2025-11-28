@@ -95,6 +95,62 @@ class Neo4jClient:
 
         logger.info("Finished creating constraints")
 
+    def create_indexes(self) -> None:
+        """Create indexes for common search fields.
+
+        Creates both text indexes (for full-text search) and regular indexes
+        (for exact matches) on frequently queried fields.
+        """
+        logger.info("Creating indexes for search fields")
+
+        with self.driver.session() as session:
+            # Text indexes for full-text search
+            text_indexes = [
+                ("work_title_text", "Work", "title"),
+                ("author_name_text", "Author", "display_name"),
+                ("institution_name_text", "Institution", "display_name"),
+                ("source_name_text", "Source", "display_name"),
+                ("topic_name_text", "Topic", "display_name"),
+            ]
+
+            for index_name, label, property_name in text_indexes:
+                query = f"""
+                CREATE TEXT INDEX {index_name} IF NOT EXISTS
+                FOR (n:{label})
+                ON (n.{property_name})
+                """
+                try:
+                    session.run(query)
+                    logger.debug(f"Created text index: {index_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to create text index {index_name}: {e}")
+
+            # Regular indexes for exact match and range queries
+            regular_indexes = [
+                ("work_doi", "Work", "doi"),
+                ("work_year", "Work", "publication_year"),
+                ("work_type", "Work", "type"),
+                ("work_oa", "Work", "is_oa"),
+                ("author_orcid", "Author", "orcid"),
+                ("institution_ror", "Institution", "ror"),
+                ("institution_country", "Institution", "country_code"),
+                ("source_issn_l", "Source", "issn_l"),
+            ]
+
+            for index_name, label, property_name in regular_indexes:
+                query = f"""
+                CREATE INDEX {index_name} IF NOT EXISTS
+                FOR (n:{label})
+                ON (n.{property_name})
+                """
+                try:
+                    session.run(query)
+                    logger.debug(f"Created index: {index_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to create index {index_name}: {e}")
+
+        logger.info("Finished creating indexes")
+
     def batch_create_nodes(
         self,
         label: str,

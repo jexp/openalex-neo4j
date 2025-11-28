@@ -124,6 +124,29 @@ Author --AFFILIATED_WITH--> Institution
 Source --PUBLISHED_BY--> Publisher
 ```
 
+### Indexes for Search Performance
+
+The tool automatically creates indexes for common search fields:
+
+**Text Indexes** (for full-text search):
+- `Work.title`
+- `Author.display_name`
+- `Institution.display_name`
+- `Source.display_name`
+- `Topic.display_name`
+
+**Regular Indexes** (for exact matches and range queries):
+- `Work.doi`
+- `Work.publication_year`
+- `Work.type`
+- `Work.is_oa`
+- `Author.orcid`
+- `Institution.ror`
+- `Institution.country_code`
+- `Source.issn_l`
+
+These indexes improve query performance for common search patterns. See the [Example Queries](#example-queries) section for usage examples.
+
 ## Testing
 
 The project has comprehensive test coverage with unit and integration tests.
@@ -202,8 +225,66 @@ MIT
 
 Contributions welcome! Please open an issue or submit a pull request.
 
+## Example Queries
+
+Once data is imported, you can query it using Cypher. Here are some examples:
+
+```cypher
+// Find works by DOI
+MATCH (w:Work {doi: "10.1038/nature12373"})
+RETURN w.title, w.publication_year
+
+// Find open access works from 2023
+MATCH (w:Work)
+WHERE w.is_oa = true AND w.publication_year = 2023
+RETURN w.title, w.doi
+LIMIT 10
+
+// Full-text search on work titles
+MATCH (w:Work)
+WHERE w.title CONTAINS "quantum computing"
+RETURN w.title, w.publication_year
+ORDER BY w.cited_by_count DESC
+LIMIT 20
+
+// Find authors by ORCID
+MATCH (a:Author {orcid: "0000-0001-2345-6789"})
+RETURN a.display_name, a.works_count
+
+// Find an author's works
+MATCH (a:Author {display_name: "Geoffrey Hinton"})-[:AUTHORED]->(w:Work)
+RETURN w.title, w.publication_year
+ORDER BY w.publication_year DESC
+LIMIT 10
+
+// Find works citing a specific paper
+MATCH (citing:Work)-[:CITES]->(cited:Work {id: "W2741809807"})
+RETURN citing.title, citing.publication_year
+ORDER BY citing.cited_by_count DESC
+LIMIT 20
+
+// Find collaborators (authors who co-authored papers)
+MATCH (a1:Author)-[:AUTHORED]->(w:Work)<-[:AUTHORED]-(a2:Author)
+WHERE a1.display_name = "Yann LeCun" AND a1 <> a2
+RETURN DISTINCT a2.display_name, count(w) as collaborations
+ORDER BY collaborations DESC
+LIMIT 10
+
+// Find papers by institution
+MATCH (i:Institution {display_name: "Stanford University"})<-[:AFFILIATED_WITH]-(a:Author)-[:AUTHORED]->(w:Work)
+RETURN DISTINCT w.title, w.publication_year
+ORDER BY w.cited_by_count DESC
+LIMIT 20
+
+// Citation network around a topic
+MATCH (t:Topic {display_name: "Machine learning"})<-[:HAS_TOPIC]-(w1:Work)-[:CITES]->(w2:Work)
+RETURN w1.title, w2.title, w1.publication_year
+LIMIT 50
+```
+
 ## Resources
 
 - [OpenAlex API Documentation](https://docs.openalex.org/)
 - [PyAlex Library](https://github.com/J535D165/pyalex)
 - [Neo4j Python Driver](https://neo4j.com/docs/python-manual/current/)
+- [Cypher Query Language](https://neo4j.com/docs/cypher-manual/current/)

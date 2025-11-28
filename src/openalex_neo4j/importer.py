@@ -62,8 +62,9 @@ class OpenAlexImporter:
             logger.info(f"Expanding relationships at depth {depth}")
             self._expand_relationships()
 
-        # Step 3: Create constraints in Neo4j
+        # Step 3: Create constraints and indexes in Neo4j
         self.neo4j.create_constraints()
+        self.neo4j.create_indexes()
 
         # Step 4: Import nodes
         logger.info("Importing nodes to Neo4j")

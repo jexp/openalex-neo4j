@@ -25,6 +25,49 @@ class TestNeo4jClientIntegration:
         # Verify constraints were created (should not raise error)
         neo4j_client.create_constraints()
 
+    def test_create_indexes(self, neo4j_client):
+        """Test creating indexes for search fields."""
+        # Create indexes
+        neo4j_client.create_indexes()
+
+        # Verify indexes were created (should not raise error when called again)
+        neo4j_client.create_indexes()
+
+        # Create some test data to verify indexes work
+        neo4j_client.batch_create_nodes("Work", [
+            {"id": "W1", "title": "Machine Learning", "doi": "10.1234/test", "publication_year": 2020, "is_oa": True},
+            {"id": "W2", "title": "Deep Learning", "publication_year": 2021, "is_oa": False},
+        ])
+        neo4j_client.batch_create_nodes("Author", [
+            {"id": "A1", "display_name": "John Doe", "orcid": "0000-0001-2345-6789"},
+        ])
+
+        # Verify we can query using indexed fields
+        with neo4j_client.driver.session() as session:
+            # Search by DOI (indexed) - use unique test DOI
+            result = session.run(
+                "MATCH (w:Work) WHERE w.doi = '10.1234/test' RETURN w.id as id"
+            )
+            records = list(result)
+            assert len(records) >= 1
+            assert "W1" in [r["id"] for r in records]
+
+            # Search by ORCID (indexed) - use unique test ORCID
+            result = session.run(
+                "MATCH (a:Author) WHERE a.orcid = '0000-0001-2345-6789' RETURN a.id as id"
+            )
+            records = list(result)
+            assert len(records) >= 1
+            assert "A1" in [r["id"] for r in records]
+
+            # Search by year (indexed) - verify W1 is in results
+            result = session.run(
+                "MATCH (w:Work) WHERE w.publication_year = 2020 AND w.id = 'W1' RETURN w.id as id"
+            )
+            records = list(result)
+            assert len(records) == 1
+            assert records[0]["id"] == "W1"
+
     def test_batch_create_nodes(self, neo4j_client):
         """Test creating nodes in batch and validating properties."""
         nodes = [
