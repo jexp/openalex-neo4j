@@ -35,7 +35,7 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = ["-v", "--strict-markers"]
 markers = [
-    "integration: marks tests as integration tests (require Neo4j instance)",
+    "integration: marks tests as integration tests (require Neo4j instance and/or OpenAlex API)",
     "unit: marks tests as unit tests",
 ]
 env = [
@@ -43,3 +43,8 @@ env = [
     "NEO4J_USERNAME=neo4j",
     "NEO4J_PASSWORD=password",
 ]
+
+# Integration test organization:
+# - tests/integration/test_neo4j_integration.py - Neo4j database operations
+# - tests/integration/test_openalex_integration.py - OpenAlex API calls
+# - tests/integration/test_full_import.py - End-to-end import workflow

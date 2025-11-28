@@ -126,19 +126,54 @@ Source --PUBLISHED_BY--> Publisher
 
 ## Testing
 
+The project has comprehensive test coverage with unit and integration tests.
+
+### Unit Tests
+
+Unit tests use mocked dependencies and don't require external services:
+
 ```bash
-# Run unit tests
+# Run all unit tests
 uv run pytest tests/ -v -m "not integration"
 
-# Run integration tests (requires running Neo4j instance)
-uv run pytest tests/test_integration.py -v
+# Run with coverage
+uv run pytest --cov=openalex_neo4j tests/ -m "not integration"
+```
 
-# Run all tests
+### Integration Tests
+
+Integration tests are organized by component and require external services:
+
+```bash
+# Run all integration tests (requires Neo4j + internet)
+uv run pytest tests/integration/ -v
+
+# Run Neo4j-only integration tests (requires running Neo4j instance)
+uv run pytest tests/integration/test_neo4j_integration.py -v
+
+# Run OpenAlex API integration tests (requires internet)
+uv run pytest tests/integration/test_openalex_integration.py -v
+
+# Run full end-to-end import tests (requires both Neo4j + internet)
+uv run pytest tests/integration/test_full_import.py -v
+```
+
+### All Tests
+
+```bash
+# Run all tests (unit + integration)
 uv run pytest tests/ -v
 
 # Run with coverage
 uv run pytest --cov=openalex_neo4j tests/
 ```
+
+### Test Organization
+
+- `tests/test_*.py` - Unit tests with mocked dependencies
+- `tests/integration/test_neo4j_integration.py` - Neo4j database operations
+- `tests/integration/test_openalex_integration.py` - OpenAlex API calls
+- `tests/integration/test_full_import.py` - End-to-end import workflow
 
 ## Development
 
