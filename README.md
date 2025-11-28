@@ -1,9 +1,10 @@
 # OpenAlex to Neo4j Import Tool
 
-A Python CLI tool for importing OpenAlex scholarly data into a Neo4j graph database. Start with a search query and expand outward to capture related works, authors, institutions, sources, citations, and more.
+A Python CLI tool for importing OpenAlex scholarly data into a Neo4j graph database and performing intelligent hybrid search. Import data starting from a search query, expand relationships, and query the knowledge graph using combined vector similarity and fulltext search.
 
 ## Features
 
+### Data Import
 - Search OpenAlex using natural language queries
 - Import scholarly data as a graph structure
 - Automatically create Neo4j constraints for data integrity
@@ -17,6 +18,14 @@ A Python CLI tool for importing OpenAlex scholarly data into a Neo4j graph datab
   - Topics
   - Publishers
   - Funders
+
+### Hybrid Search
+- **Vector similarity search** using sentence embeddings (all-MiniLM-L6-v2)
+- **Fulltext search** using Lucene-based FULLTEXT indexes
+- **Reciprocal Rank Fusion (RRF)** for intelligent result merging
+- Comprehensive results with authors, institutions, topics, citations
+- Configurable weights for vector vs fulltext search
+- Tabular output with detailed paper information
 
 ## Requirements
 
@@ -73,30 +82,25 @@ See `.env.example` for a template.
 
 ## Usage
 
-### Basic usage with environment variables
+The CLI has two main commands: `import` for loading data from OpenAlex, and `search` for querying the knowledge graph.
+
+### Import Data
+
+Import scholarly data from OpenAlex into Neo4j:
 
 ```bash
-# Using uv
-uv run openalex-neo4j --query "artificial intelligence" --limit 50
+# Basic import
+uv run openalex-neo4j import --query "artificial intelligence" --limit 50
 
-# Or with python -m
-uv run python -m openalex_neo4j.cli --query "artificial intelligence" --limit 50
-```
-
-### Using CLI parameters
-
-```bash
-uv run openalex-neo4j \
+# Import with embeddings for semantic search
+uv run openalex-neo4j import \
   --query "machine learning ethics" \
   --limit 100 \
-  --neo4j-uri bolt://localhost:7687 \
-  --neo4j-username neo4j \
-  --neo4j-password password \
-  --email your.email@example.com \
+  --generate-embeddings \
   --expand-depth 2
 ```
 
-### Options
+**Import Options:**
 
 - `--query, -q`: OpenAlex search query (required)
 - `--limit, -l`: Maximum number of works to fetch (default: 100)
@@ -107,6 +111,45 @@ uv run openalex-neo4j \
 - `--expand-depth`: Levels of relationship expansion (default: 1)
 - `--skip-abstracts`: Skip storing abstracts (faster import, less storage)
 - `--generate-embeddings`: Generate embeddings for semantic search (requires `--extra embeddings`)
+- `--verbose, -v`: Enable verbose logging
+
+### Search the Knowledge Graph
+
+Perform hybrid search combining vector similarity and fulltext search:
+
+```bash
+# Basic search
+uv run openalex-neo4j search --query "neural networks for computer vision"
+
+# Advanced search with custom weights
+uv run openalex-neo4j search \
+  --query "transformer architectures" \
+  --limit 20 \
+  --vector-weight 0.7 \
+  --fulltext-weight 0.3
+```
+
+**Search Options:**
+
+- `--query, -q`: Search query in natural language (required)
+- `--limit, -l`: Number of results to return (default: 10)
+- `--neo4j-uri`: Neo4j connection URI (env: NEO4J_URI)
+- `--neo4j-username`: Neo4j username (env: NEO4J_USERNAME)
+- `--neo4j-password`: Neo4j password (env: NEO4J_PASSWORD)
+- `--vector-weight`: Weight for vector search, 0-1 (default: 0.5)
+- `--fulltext-weight`: Weight for fulltext search, 0-1 (default: 0.5)
+- `--rrf-k`: RRF constant for rank fusion (default: 60)
+- `--verbose, -v`: Enable verbose logging
+
+**How Hybrid Search Works:**
+
+The search command combines two search methods using Reciprocal Rank Fusion (RRF):
+
+1. **Vector Similarity Search**: Generates an embedding for your query and finds papers with similar embeddings (semantic similarity)
+2. **Fulltext Search**: Uses Lucene-based fulltext index to find papers matching keywords in titles and abstracts
+3. **Reciprocal Rank Fusion**: Merges results from both methods using RRF, which gives higher scores to papers that rank well in both searches
+
+Results include comprehensive information: title, authors, institutions, topics, source, DOI, citations, and abstract preview.
 
 ## Architecture
 
