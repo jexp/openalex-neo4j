@@ -37,7 +37,9 @@ class OpenAlexImporter:
         self,
         query: str,
         limit: int = 100,
-        expand_depth: int = 1
+        expand_depth: int = 1,
+        skip_abstracts: bool = False,
+        generate_embeddings: bool = False
     ) -> dict[str, int]:
         """Import data starting from a search query.
 
@@ -47,11 +49,17 @@ class OpenAlexImporter:
             expand_depth: How many levels to expand relationships
                 1 = Direct relationships only
                 2 = Include citations of citations, etc.
+            skip_abstracts: If True, don't store abstracts (faster import)
+            generate_embeddings: If True, generate embeddings for semantic search
+                (requires sentence-transformers)
 
         Returns:
             Dictionary with counts of imported entities
         """
-        logger.info(f"Starting import: query='{query}', limit={limit}, depth={expand_depth}")
+        logger.info(
+            f"Starting import: query='{query}', limit={limit}, depth={expand_depth}, "
+            f"skip_abstracts={skip_abstracts}, generate_embeddings={generate_embeddings}"
+        )
 
         # Step 1: Search for initial works
         initial_works = self.openalex.search_works(query, limit)
@@ -62,15 +70,25 @@ class OpenAlexImporter:
             logger.info(f"Expanding relationships at depth {depth}")
             self._expand_relationships()
 
-        # Step 3: Create constraints and indexes in Neo4j
-        self.neo4j.create_constraints()
-        self.neo4j.create_indexes()
+        # Step 3: Optionally skip abstracts if not needed
+        if skip_abstracts:
+            logger.info("Skipping abstracts as requested")
+            for work in self.works.values():
+                work.abstract = None
 
-        # Step 4: Import nodes
+        # Step 4: Generate embeddings if requested
+        if generate_embeddings:
+            self._generate_embeddings()
+
+        # Step 5: Create constraints and indexes in Neo4j
+        self.neo4j.create_constraints()
+        self.neo4j.create_indexes(include_vector=generate_embeddings)
+
+        # Step 6: Import nodes
         logger.info("Importing nodes to Neo4j")
         node_counts = self._import_nodes()
 
-        # Step 5: Import relationships
+        # Step 7: Import relationships
         logger.info("Importing relationships to Neo4j")
         rel_counts = self._import_relationships()
 
@@ -326,3 +344,29 @@ class OpenAlexImporter:
             )
 
         return counts
+
+    def _generate_embeddings(self) -> None:
+        """Generate embeddings for all works with titles/abstracts."""
+        try:
+            from .embeddings import generate_work_embedding
+        except ImportError:
+            logger.error(
+                "sentence-transformers not installed. "
+                "Install with: uv sync --extra embeddings"
+            )
+            return
+
+        logger.info(f"Generating embeddings for {len(self.works)} works")
+
+        embedded_count = 0
+        for work_id, work in self.works.items():
+            if work.title:
+                embedding = generate_work_embedding(work.title, work.abstract)
+                if embedding:
+                    work.embedding = embedding
+                    embedded_count += 1
+
+                    if embedded_count % 100 == 0:
+                        logger.info(f"Generated {embedded_count} embeddings...")
+
+        logger.info(f"Generated embeddings for {embedded_count} works")

@@ -32,6 +32,7 @@ class Work:
     cited_by_count: int = 0
     is_oa: bool = False
     abstract: str | None = None
+    embedding: list[float] | None = None
     author_ids: list[str] = field(default_factory=list)
     institution_ids: list[str] = field(default_factory=list)
     source_id: str | None = None
@@ -116,7 +117,7 @@ class Work:
 
     def to_node_dict(self) -> dict[str, Any]:
         """Convert to dictionary for Neo4j node creation."""
-        return {
+        node_dict = {
             "id": self.id,
             "title": self.title,
             "publication_year": self.publication_year,
@@ -127,6 +128,10 @@ class Work:
             "is_oa": self.is_oa,
             "abstract": self.abstract,
         }
+        # Only include embedding if it exists
+        if self.embedding:
+            node_dict["embedding"] = self.embedding
+        return node_dict
 
 
 @dataclass

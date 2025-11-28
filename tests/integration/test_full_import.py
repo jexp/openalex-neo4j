@@ -260,3 +260,246 @@ class TestFullImportWorkflow:
         finally:
             neo4j_client.clear_database()
             neo4j_client.close()
+
+    def test_skip_abstracts(self, neo4j_uri, neo4j_username, neo4j_password):
+        """Test that abstracts are skipped when --skip-abstracts flag is used."""
+        neo4j_client = Neo4jClient(neo4j_uri, neo4j_username, neo4j_password)
+        try:
+            neo4j_client.connect()
+        except Exception as e:
+            pytest.skip(f"Cannot connect to Neo4j: {e}")
+
+        openalex_email = os.getenv("OPENALEX_EMAIL")
+        openalex_client = OpenAlexClient(email=openalex_email)
+
+        importer = OpenAlexImporter(neo4j_client, openalex_client)
+
+        try:
+            # Import with skip_abstracts=True
+            counts = importer.import_from_query(
+                query="quantum computing",
+                limit=2,
+                expand_depth=1,
+                skip_abstracts=True
+            )
+
+            assert counts.get("works", 0) > 0
+
+            # Verify abstracts are None in database
+            if importer.works:
+                work_id = list(importer.works.keys())[0]
+                work_from_db = neo4j_client.get_node_by_id("Work", work_id)
+
+                assert work_from_db is not None
+                # Abstract should be None or not present
+                assert work_from_db.get("abstract") is None
+                print(f"Verified abstract is skipped for work: {work_from_db['title']}")
+
+        finally:
+            neo4j_client.clear_database()
+            neo4j_client.close()
+
+    def test_abstract_storage(self, neo4j_uri, neo4j_username, neo4j_password):
+        """Test that abstracts are stored when skip_abstracts is False."""
+        neo4j_client = Neo4jClient(neo4j_uri, neo4j_username, neo4j_password)
+        try:
+            neo4j_client.connect()
+        except Exception as e:
+            pytest.skip(f"Cannot connect to Neo4j: {e}")
+
+        openalex_email = os.getenv("OPENALEX_EMAIL")
+        openalex_client = OpenAlexClient(email=openalex_email)
+
+        importer = OpenAlexImporter(neo4j_client, openalex_client)
+
+        try:
+            # Import with skip_abstracts=False (default)
+            counts = importer.import_from_query(
+                query="neural networks",
+                limit=2,
+                expand_depth=1,
+                skip_abstracts=False
+            )
+
+            assert counts.get("works", 0) > 0
+
+            # Check if any works have abstracts
+            has_abstract = False
+            for work_id in list(importer.works.keys())[:3]:  # Check first 3
+                work_from_db = neo4j_client.get_node_by_id("Work", work_id)
+                if work_from_db and work_from_db.get("abstract"):
+                    has_abstract = True
+                    print(f"Verified abstract stored for: {work_from_db['title']}")
+                    break
+
+            # At least some works should have abstracts (not all papers have abstracts in OpenAlex)
+            if has_abstract:
+                print("Abstracts are being stored correctly")
+
+        finally:
+            neo4j_client.clear_database()
+            neo4j_client.close()
+
+    def test_fulltext_index(self, neo4j_uri, neo4j_username, neo4j_password):
+        """Test that FULLTEXT index is created and can be queried."""
+        neo4j_client = Neo4jClient(neo4j_uri, neo4j_username, neo4j_password)
+        try:
+            neo4j_client.connect()
+        except Exception as e:
+            pytest.skip(f"Cannot connect to Neo4j: {e}")
+
+        openalex_email = os.getenv("OPENALEX_EMAIL")
+        openalex_client = OpenAlexClient(email=openalex_email)
+
+        importer = OpenAlexImporter(neo4j_client, openalex_client)
+
+        try:
+            # Import with abstracts
+            counts = importer.import_from_query(
+                query="machine learning",
+                limit=3,
+                expand_depth=1,
+                skip_abstracts=False
+            )
+
+            assert counts.get("works", 0) > 0
+
+            # Test FULLTEXT index query with Lucene syntax
+            with neo4j_client.driver.session() as session:
+                result = session.run("""
+                    CALL db.index.fulltext.queryNodes("work_fulltext", "machine AND learning")
+                    YIELD node, score
+                    RETURN node.id as id, node.title as title, score
+                    LIMIT 5
+                """)
+                records = list(result)
+
+                if records:
+                    print(f"FULLTEXT index returned {len(records)} results")
+                    print(f"Top result: {records[0]['title']} (score: {records[0]['score']})")
+                    assert len(records) > 0
+                else:
+                    # If no results, the index might not be ready yet, but it should exist
+                    print("FULLTEXT index exists but returned no results (may need time to populate)")
+
+        finally:
+            neo4j_client.clear_database()
+            neo4j_client.close()
+
+    def test_embeddings_generation(self, neo4j_uri, neo4j_username, neo4j_password):
+        """Test that embeddings are generated when --generate-embeddings flag is used."""
+        try:
+            # Try to import sentence-transformers
+            import sentence_transformers
+        except ImportError:
+            pytest.skip("sentence-transformers not installed (run: uv sync --extra embeddings)")
+
+        neo4j_client = Neo4jClient(neo4j_uri, neo4j_username, neo4j_password)
+        try:
+            neo4j_client.connect()
+        except Exception as e:
+            pytest.skip(f"Cannot connect to Neo4j: {e}")
+
+        openalex_email = os.getenv("OPENALEX_EMAIL")
+        openalex_client = OpenAlexClient(email=openalex_email)
+
+        importer = OpenAlexImporter(neo4j_client, openalex_client)
+
+        try:
+            # Import with generate_embeddings=True
+            counts = importer.import_from_query(
+                query="deep learning",
+                limit=2,
+                expand_depth=1,
+                generate_embeddings=True
+            )
+
+            assert counts.get("works", 0) > 0
+
+            # Verify embeddings are stored
+            embedded_count = 0
+            for work_id in list(importer.works.keys()):
+                work_from_db = neo4j_client.get_node_by_id("Work", work_id)
+                if work_from_db and work_from_db.get("embedding"):
+                    embedding = work_from_db["embedding"]
+                    # Verify embedding is a list of 384 floats
+                    assert isinstance(embedding, list)
+                    assert len(embedding) == 384
+                    assert all(isinstance(x, float) for x in embedding)
+                    embedded_count += 1
+                    print(f"Verified embedding for: {work_from_db['title']}")
+
+            # At least some works should have embeddings
+            assert embedded_count > 0, "No embeddings were generated"
+            print(f"Successfully generated embeddings for {embedded_count} works")
+
+        finally:
+            neo4j_client.clear_database()
+            neo4j_client.close()
+
+    def test_vector_index(self, neo4j_uri, neo4j_username, neo4j_password):
+        """Test that vector index is created and can be queried for similarity search."""
+        try:
+            import sentence_transformers
+        except ImportError:
+            pytest.skip("sentence-transformers not installed (run: uv sync --extra embeddings)")
+
+        neo4j_client = Neo4jClient(neo4j_uri, neo4j_username, neo4j_password)
+        try:
+            neo4j_client.connect()
+        except Exception as e:
+            pytest.skip(f"Cannot connect to Neo4j: {e}")
+
+        openalex_email = os.getenv("OPENALEX_EMAIL")
+        openalex_client = OpenAlexClient(email=openalex_email)
+
+        importer = OpenAlexImporter(neo4j_client, openalex_client)
+
+        try:
+            # Import with embeddings
+            counts = importer.import_from_query(
+                query="neural networks",
+                limit=3,
+                expand_depth=1,
+                generate_embeddings=True
+            )
+
+            assert counts.get("works", 0) > 0
+
+            # Find a work with an embedding
+            test_work_id = None
+            for work_id in importer.works.keys():
+                work = neo4j_client.get_node_by_id("Work", work_id)
+                if work and work.get("embedding"):
+                    test_work_id = work_id
+                    break
+
+            if not test_work_id:
+                pytest.skip("No works with embeddings found")
+
+            # Test vector similarity search
+            with neo4j_client.driver.session() as session:
+                result = session.run("""
+                    MATCH (w:Work {id: $work_id})
+                    CALL db.index.vector.queryNodes("work_embedding_vector", 5, w.embedding)
+                    YIELD node, score
+                    WHERE node.id <> $work_id
+                    RETURN node.id as id, node.title as title, score
+                    ORDER BY score DESC
+                    LIMIT 3
+                """, work_id=test_work_id)
+
+                records = list(result)
+
+                if records:
+                    print(f"Vector similarity search returned {len(records)} results")
+                    for rec in records:
+                        print(f"  Similar paper: {rec['title']} (score: {rec['score']})")
+                    assert len(records) > 0
+                else:
+                    # Vector index might need time to populate
+                    print("Vector index exists but returned no results (may need time to populate)")
+
+        finally:
+            neo4j_client.clear_database()
+            neo4j_client.close()

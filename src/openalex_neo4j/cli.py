@@ -61,6 +61,16 @@ logger = logging.getLogger(__name__)
     help="Levels of relationship expansion (default: 1)",
 )
 @click.option(
+    "--skip-abstracts",
+    is_flag=True,
+    help="Skip storing abstracts (faster import, less storage)",
+)
+@click.option(
+    "--generate-embeddings",
+    is_flag=True,
+    help="Generate embeddings for semantic search (requires sentence-transformers)",
+)
+@click.option(
     "--verbose", "-v",
     is_flag=True,
     help="Enable verbose logging",
@@ -73,6 +83,8 @@ def main(
     neo4j_password: str | None,
     email: str | None,
     expand_depth: int,
+    skip_abstracts: bool,
+    generate_embeddings: bool,
     verbose: bool,
 ) -> None:
     """Import OpenAlex scholarly data into Neo4j.
@@ -130,7 +142,11 @@ def main(
 
         # Create importer and run
         importer = OpenAlexImporter(neo4j_client, openalex_client)
-        counts = importer.import_from_query(query, limit, expand_depth)
+        counts = importer.import_from_query(
+            query, limit, expand_depth,
+            skip_abstracts=skip_abstracts,
+            generate_embeddings=generate_embeddings
+        )
 
         # Display results
         click.echo()

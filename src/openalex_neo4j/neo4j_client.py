@@ -95,16 +95,32 @@ class Neo4jClient:
 
         logger.info("Finished creating constraints")
 
-    def create_indexes(self) -> None:
+    def create_indexes(self, include_vector: bool = False) -> None:
         """Create indexes for common search fields.
 
         Creates both text indexes (for full-text search) and regular indexes
-        (for exact matches) on frequently queried fields.
+        (for exact matches) on frequently queried fields. Optionally creates
+        vector index for semantic search.
+
+        Args:
+            include_vector: If True, create vector index for embeddings
         """
         logger.info("Creating indexes for search fields")
 
         with self.driver.session() as session:
-            # Text indexes for full-text search
+            # Fulltext index for Work (title + abstract) - uses Lucene syntax
+            try:
+                query = """
+                CREATE FULLTEXT INDEX work_fulltext IF NOT EXISTS
+                FOR (n:Work)
+                ON EACH [n.title, n.abstract]
+                """
+                session.run(query)
+                logger.info("Created fulltext index for Work (title + abstract)")
+            except Exception as e:
+                logger.warning(f"Failed to create fulltext index: {e}")
+
+            # Text indexes for simple string matching
             text_indexes = [
                 ("work_title_text", "Work", "title"),
                 ("author_name_text", "Author", "display_name"),
@@ -148,6 +164,24 @@ class Neo4jClient:
                     logger.debug(f"Created index: {index_name}")
                 except Exception as e:
                     logger.warning(f"Failed to create index {index_name}: {e}")
+
+            # Vector index for semantic search (if requested)
+            if include_vector:
+                try:
+                    # Check Neo4j version supports vector indexes (5.11+)
+                    query = """
+                    CREATE VECTOR INDEX work_embedding_vector IF NOT EXISTS
+                    FOR (n:Work)
+                    ON (n.embedding)
+                    OPTIONS {indexConfig: {
+                        `vector.dimensions`: 384,
+                        `vector.similarity_function`: 'cosine'
+                    }}
+                    """
+                    session.run(query)
+                    logger.info("Created vector index for semantic search")
+                except Exception as e:
+                    logger.warning(f"Failed to create vector index (requires Neo4j 5.11+): {e}")
 
         logger.info("Finished creating indexes")
 

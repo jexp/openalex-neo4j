@@ -36,6 +36,9 @@ cd openalex-neo4j
 # Install dependencies (uv handles venv automatically)
 uv sync
 
+# Optional: Install with embedding support for semantic search
+uv sync --extra embeddings
+
 # Or install in development mode
 uv pip install -e ".[dev]"
 ```
@@ -102,6 +105,8 @@ uv run openalex-neo4j \
 - `--neo4j-password`: Neo4j password (env: NEO4J_PASSWORD)
 - `--email`: Email for OpenAlex polite pool (env: OPENALEX_EMAIL)
 - `--expand-depth`: Levels of relationship expansion (default: 1)
+- `--skip-abstracts`: Skip storing abstracts (faster import, less storage)
+- `--generate-embeddings`: Generate embeddings for semantic search (requires `--extra embeddings`)
 
 ## Architecture
 
@@ -128,22 +133,34 @@ Source --PUBLISHED_BY--> Publisher
 
 The tool automatically creates indexes for common search fields:
 
-**Text Indexes** (for full-text search):
-- `Work.title`
-- `Author.display_name`
-- `Institution.display_name`
-- `Source.display_name`
-- `Topic.display_name`
+**FULLTEXT Index** (Lucene-based, multi-property search):
+- `work_fulltext` - Searches across both `Work.title` and `Work.abstract`
+  - Requires procedure call: `db.index.fulltext.queryNodes()`
+  - Supports Lucene query syntax (AND, OR, NOT, wildcards, fuzzy search)
+  - Returns relevance scores
+
+**TEXT Indexes** (for simple string matching):
+- `Work.title` - Simple title search in regular Cypher queries
+- `Author.display_name` - Find authors by name
+- `Institution.display_name` - Search institutions
+- `Source.display_name` - Find journals/venues
+- `Topic.display_name` - Search by research topics
 
 **Regular Indexes** (for exact matches and range queries):
-- `Work.doi`
-- `Work.publication_year`
-- `Work.type`
-- `Work.is_oa`
-- `Author.orcid`
-- `Institution.ror`
-- `Institution.country_code`
-- `Source.issn_l`
+- `Work.doi` - Lookup papers by DOI
+- `Work.publication_year` - Filter/sort by year
+- `Work.type` - Filter by publication type
+- `Work.is_oa` - Filter open access papers
+- `Author.orcid` - Find authors by ORCID
+- `Institution.ror` - Lookup by ROR identifier
+- `Institution.country_code` - Filter by country
+- `Source.issn_l` - Find journals by ISSN
+
+**Vector Index** (for semantic search, optional):
+- `Work.embedding` - Similarity search on paper content (384-dimensional)
+  - Enabled with `--generate-embeddings` flag
+  - Uses all-MiniLM-L6-v2 model for embeddings
+  - Requires Neo4j 5.11+ and `sentence-transformers` package
 
 These indexes improve query performance for common search patterns. See the [Example Queries](#example-queries) section for usage examples.
 
@@ -230,7 +247,7 @@ Contributions welcome! Please open an issue or submit a pull request.
 Once data is imported, you can query it using Cypher. Here are some examples:
 
 ```cypher
-// Find works by DOI
+// Find works by DOI (exact match)
 MATCH (w:Work {doi: "10.1038/nature12373"})
 RETURN w.title, w.publication_year
 
@@ -240,9 +257,24 @@ WHERE w.is_oa = true AND w.publication_year = 2023
 RETURN w.title, w.doi
 LIMIT 10
 
-// Full-text search on work titles
+// FULLTEXT search across title and abstract (Lucene syntax)
+CALL db.index.fulltext.queryNodes("work_fulltext", "quantum AND computing")
+YIELD node, score
+RETURN node.title, node.publication_year, score
+ORDER BY score DESC
+LIMIT 20
+
+// FULLTEXT search with wildcards and fuzzy matching
+CALL db.index.fulltext.queryNodes("work_fulltext", "machinelearning~ OR \"deep learning\"")
+YIELD node, score
+WHERE score > 0.5
+RETURN node.title, node.abstract, score
+ORDER BY score DESC
+LIMIT 10
+
+// Simple substring search on title (when fulltext not needed)
 MATCH (w:Work)
-WHERE w.title CONTAINS "quantum computing"
+WHERE w.title CONTAINS "neural"
 RETURN w.title, w.publication_year
 ORDER BY w.cited_by_count DESC
 LIMIT 20
@@ -280,6 +312,15 @@ LIMIT 20
 MATCH (t:Topic {display_name: "Machine learning"})<-[:HAS_TOPIC]-(w1:Work)-[:CITES]->(w2:Work)
 RETURN w1.title, w2.title, w1.publication_year
 LIMIT 50
+
+// Find similar papers using vector similarity (requires --generate-embeddings)
+MATCH (w:Work {id: "W2741809807"})
+CALL db.index.vector.queryNodes("work_embedding_vector", 10, w.embedding)
+YIELD node, score
+WHERE node <> w
+RETURN node.title, node.publication_year, score
+ORDER BY score DESC
+LIMIT 10
 ```
 
 ## Resources
